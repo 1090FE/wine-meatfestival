@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Questionnaire Summary Tool</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #f4f4f4;
+    }
+    h1, h2 { color: #333; }
+    form {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    label {
+        display: block;
+        margin: 10px 0 5px;
+        font-weight: bold;
+    }
+    input[type="text"], textarea {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+    }
+    input[type="radio"], input[type="checkbox"] { margin-right: 5px; }
+    button {
+        background: #007bff;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin: 10px 5px;
+    }
+    button:hover { background: #0056b3; }
+    #summary, #graphs {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    .stat {
+        margin: 10px 0;
+        padding: 10px;
+        background: #e9ecef;
+        border-radius: 4px;
+    }
+    canvas { max-width: 100%; margin: 20px 0; }
+    #exportBtn { background: #28a745; }
+    #exportBtn:hover { background: #218838; }
+    #clearBtn { background: #dc3545; }
+    #clearBtn:hover { background: #c82333; }
+</style>
+</head>
+<body>
+<h1>Questionnaire Summary Tool</h1>
+
+<!-- FORM SECTION -->
+<section>
+<h2>Input Member Response</h2>
+<form id="questionnaireForm">
+    <label>1. Have you seen our ongoing event or promotion in the store? (Wine & Meat Festival)</label>
+    <input type="radio" name="q1" value="yes"> Yes
+    <input type="radio" name="q1" value="no"> No<br><br>
+
+    <label id="q2Label" style="display:none;">2. On which channels did you see or hear about it? (Select all that apply)</label>
+    <div id="q2Channels" style="display:none;">
+        <input type="checkbox" name="channels" value="sms"> Text/SMS<br>
+        <input type="checkbox" name="channels" value="viber"> Viber<br>
+        <input type="checkbox" name="channels" value="email"> Email<br>
+        <input type="checkbox" name="channels" value="facebook"> Facebook or Social Media<br>
+        <input type="checkbox" name="channels" value="banner"> Banner/Streamer<br>
+        <input type="checkbox" name="channels" value="employee"> Employee<br>
+    </div><br>
+
+    <label>3. What would you like to see or experience at Landers during events like this?</label>
+    <textarea name="q3" rows="3" placeholder="Enter response..."></textarea><br><br>
+
+    <label>4. What items or products are you most excited to buy?</label>
+    <textarea name="q4" rows="3" placeholder="Enter response..."></textarea><br><br>
+
+    <label>5. Are you satisfied or happy with your purchase today?</label>
+    <input type="radio" name="q5" value="yes"> Yes
+    <input type="radio" name="q5" value="no"> No<br>
+    <label>Explanation (Please share what you like most? / Please tell us what we can improve if answer is no?)</label>
+    <textarea name="q5Explanation" rows="3" placeholder="Enter explanation..."></textarea><br><br>
+
+    <label>Comments or Suggestions:</label>
+    <textarea name="CommentsOrSuggestions" rows="3" placeholder="Enter Comments or Suggestions..."></textarea><br><br>
+
+    <button type="submit">Submit Response</button>
+    <button type="button" id="clearForm">Clear Form</button>
+</form>
+</section>
+
+<!-- SUMMARY SECTION -->
+<section id="summary">
+<h2>Summary</h2>
+<div id="summaryContent">
+    <p>No responses yet. Submit some to see summary.</p>
+</div>
+<button id="loadSummary">Load Summary</button>
+<button id="clearAll">Clear All Data</button>
+</section>
+
+<!-- GRAPHS SECTION -->
+<section id="graphs">
+<h2>Graphs</h2>
+<canvas id="q1Chart"></canvas>
+<canvas id="channelsChart"></canvas>
+<canvas id="q5Chart"></canvas>
+<canvas id="commentsChart"></canvas>
+</section>
+
+<button id="exportBtn">Export to CSV (Excel Compatible)</button>
+
+<script>
+const STORAGE_KEY = 'questionnaireResponses';
+
+// LOAD and SAVE functions
+function loadResponses() {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+}
+function saveResponses(responses) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(responses));
+}
+
+// COMPUTE SUMMARY
+function computeSummary(responses) {
+    const summary = {
+        total: responses.length,
+        q1: { yes: 0, no: 0 },
+        channels: { sms: 0, viber: 0, email: 0, facebook: 0, banner: 0, employee: 0 },
+        totalChannelSelections: 0,
+        q3Expectations: new Map(),
+        q4Excited: new Map(),
+        q5: { yes: 0, no: 0 },
+        q5Explanations: [],
+        comments: [] // <-- NEW field for comments/suggestions
+    };
+
+    responses.forEach(r => {
+        if (r.q1 === 'yes') summary.q1.yes++; else if (r.q1 === 'no') summary.q1.no++;
+        if (r.q1 === 'yes' && r.channels?.length) {
+            r.channels.forEach(ch => {
+                summary.channels[ch] = (summary.channels[ch] || 0) + 1;
+                summary.totalChannelSelections++;
+            });
+        }
+        if (r.q3) summary.q3Expectations.set(r.q3, (summary.q3Expectations.get(r.q3) || 0) + 1);
+        if (r.q4) summary.q4Excited.set(r.q4, (summary.q4Excited.get(r.q4) || 0) + 1);
+        if (r.q5 === 'yes') summary.q5.yes++; else if (r.q5 === 'no') summary.q5.no++;
+        if (r.q5Explanation) summary.q5Explanations.push({ satisfied: r.q5, explanation: r.q5Explanation });
+        if (r.comments) summary.comments.push(r.comments); // <-- Add collected comments
+    });
+
+    summary.mostExpectation = Array.from(summary.q3Expectations.entries()).sort((a,b)=>b[1]-a[1])[0] || ['None',0];
+    summary.mostExcited = Array.from(summary.q4Excited.entries()).sort((a,b)=>b[1]-a[1])[0] || ['None',0];
+    const maxChannelCount = Math.max(...Object.values(summary.channels));
+    summary.mostChannel = maxChannelCount>0
+        ? Object.entries(summary.channels).find(([_,c])=>c===maxChannelCount)
+        : ['None',0];
+    return summary;
+}
+
+// DISPLAY SUMMARY
+function displaySummary() {
+    const responses = loadResponses();
+    if (!responses.length) {
+        document.getElementById('summaryContent').innerHTML = '<p>No responses yet. Submit some to see summary.</p>';
+        return;
+    }
+
+    const s = computeSummary(responses);
+    let html = `
+        <div class="stat"><strong>Total Responses:</strong> ${s.total}</div>
+        <div class="stat"><strong>Q1 - Seen Promotion:</strong> Yes: ${s.q1.yes}, No: ${s.q1.no}</div>
+        <div class="stat"><strong>Total Channel Selections:</strong> ${s.totalChannelSelections}</div>
+        <div class="stat"><strong>Most Chosen Channel:</strong> ${s.mostChannel[0]} (${s.mostChannel[1]} times)</div>
+        <div class="stat"><strong>Most Common Expectation:</strong> "${s.mostExpectation[0]}" (${s.mostExpectation[1]} times)</div>
+        <div class="stat"><strong>Most Excited Item/Product:</strong> "${s.mostExcited[0]}" (${s.mostExcited[1]} times)</div>
+        <div class="stat"><strong>Q5 - Satisfied:</strong> Yes: ${s.q5.yes}, No: ${s.q5.no}</div>
+        <div class="stat"><strong>Satisfaction Explanations:</strong></div>
+        <ul>${s.q5Explanations.map(e=>`<li>${e.satisfied.toUpperCase()}: ${e.explanation}</li>`).join('')}</ul>
+        <div class="stat"><strong>Comments/Suggestions:</strong></div>
+        <ul>${s.comments.map(c=>`<li>${c}</li>`).join('')}</ul>
+    `;
+    document.getElementById('summaryContent').innerHTML = html;
+}
+
+// GRAPHS
+let q1Chart, channelsChart, q5Chart, commentsChart;
+function drawGraphs() {
+    const responses = loadResponses();
+    if (!responses.length) return;
+    const s = computeSummary(responses);
+
+    const ctxQ1 = document.getElementById('q1Chart').getContext('2d');
+    if (q1Chart) q1Chart.destroy();
+    q1Chart = new Chart(ctxQ1, {
+        type: 'bar',
+        data: { labels: ['Yes','No'], datasets:[{label:'Responses',data:[s.q1.yes,s.q1.no],backgroundColor:['#28a745','#dc3545']}]},
+        options:{plugins:{title:{display:true,text:'Q1: Seen Promotion'}}}
+    });
+
+    const ctxCh = document.getElementById('channelsChart').getContext('2d');
+    if (channelsChart) channelsChart.destroy();
+    channelsChart = new Chart(ctxCh, {
+        type: 'bar',
+        data:{labels:Object.keys(s.channels),datasets:[{label:'Channel Counts',data:Object.values(s.channels),backgroundColor:'#007bff'}]},
+        options:{plugins:{title:{display:true,text:'Q2: Channels'}}}
+    });
+
+    const ctxQ5 = document.getElementById('q5Chart').getContext('2d');
+    if (q5Chart) q5Chart.destroy();
+    q5Chart = new Chart(ctxQ5, {
+        type: 'bar',
+        data:{labels:['Yes','No'],datasets:[{label:'Responses',data:[s.q5.yes,s.q5.no],backgroundColor:['#28a745','#dc3545']}]},
+        options:{plugins:{title:{display:true,text:'Q5: Satisfied with Purchase'}}}
+    });
+
+    // ✅ NEW: Comments Visualization — Positive vs Negative Count
+    let positiveCount = 0;
+    let negativeCount = 0;
+
+    const positiveWords = ["good","great","excellent","love","nice","amazing","awesome","happy","satisfied","enjoy"];
+    const negativeWords = ["bad","poor","terrible","hate","disappointed","expensive","slow","sad","unsatisfied","worse"];
+
+    s.comments.forEach(c => {
+        const text = c.toLowerCase();
+        if (positiveWords.some(w => text.includes(w))) positiveCount++;
+        else if (negativeWords.some(w => text.includes(w))) negativeCount++;
+    });
+
+    const ctxComments = document.getElementById('commentsChart').getContext('2d');
+    if (commentsChart) commentsChart.destroy();
+    commentsChart = new Chart(ctxComments, {
+        type: 'bar',
+        data: {
+            labels: ['Positive Comments', 'Negative Comments'],
+            datasets: [{
+                label: 'Comments Sentiment Count',
+                data: [positiveCount, negativeCount],
+                backgroundColor: ['#28a745', '#dc3545']
+            }]
+        },
+        options: {
+            plugins: { title: { display: true, text: 'Comments / Suggestions Sentiment Analysis' } },
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+}
+
+
+// EXPORT TO CSV (added comments)
+function exportToCSV() {
+    const responses = loadResponses();
+    if (!responses.length) { alert('No data to export.'); return; }
+
+    let csv = '--- Raw Responses ---\n';
+    csv += 'Q1,Q2 Channels,Q3 Expectation,Q4 Excited Item,Q5 Satisfied,Q5 Explanation,Comments\n';
+    responses.forEach(r => {
+        const channels = r.channels?.join(';') || '';
+        csv += `"${r.q1}","${channels}","${r.q3 || ''}","${r.q4 || ''}","${r.q5}","${r.q5Explanation || ''}","${r.comments || ''}"\n`;
+    });
+
+    const s = computeSummary(responses);
+    csv += '\n--- Summary Details ---\n';
+    csv += `Total Responses,${s.total}\n`;
+    csv += `Q1 Seen Promotion - Yes,${s.q1.yes}\n`;
+    csv += `Q1 Seen Promotion - No,${s.q1.no}\n`;
+    csv += `Total Channel Selections,${s.totalChannelSelections}\n`;
+    csv += `Most Chosen Channel,${s.mostChannel[0]} (${s.mostChannel[1]} times)\n`;
+    csv += `Most Common Expectation,"${s.mostExpectation[0]}" (${s.mostExpectation[1]} times)\n`;
+    csv += `Most Excited Item/Product,"${s.mostExcited[0]}" (${s.mostExcited[1]} times)\n`;
+    csv += `Q5 Satisfied - Yes,${s.q5.yes}\n`;
+    csv += `Q5 Satisfied - No,${s.q5.no}\n`;
+
+    csv += '\n--- Satisfaction Explanations ---\n';
+    s.q5Explanations.forEach((e,i)=>csv += `Explanation ${i+1},${e.satisfied.toUpperCase()},"${e.explanation}"\n`);
+    csv += '\n--- Comments/Suggestions ---\n';
+    s.comments.forEach((c,i)=>csv += `Comment ${i+1},"${c}"\n`);
+
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'questionnaire_summary.csv'; a.click();
+    URL.revokeObjectURL(url);
+}
+
+// FORM HANDLING
+document.getElementById('questionnaireForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const r = {
+        q1: fd.get('q1') || '',
+        channels: Array.from(document.querySelectorAll('input[name="channels"]:checked')).map(cb => cb.value),
+        q3: fd.get('q3') || '',
+        q4: fd.get('q4') || '',
+        q5: fd.get('q5') || '',
+        q5Explanation: fd.get('q5Explanation') || '',
+        comments: fd.get('CommentsOrSuggestions') || '' // <-- NEW capture
+    };
+    if (!r.q1) return alert('Please answer Q1.');
+    if (r.q1==='no') r.channels=[];
+    const responses=loadResponses(); responses.push(r); saveResponses(responses);
+    e.target.reset();
+    document.getElementById('q2Label').style.display='none';
+    document.getElementById('q2Channels').style.display='none';
+    alert('Response saved!');
+});
+
+// Show/hide Q2 channels
+document.querySelectorAll('input[name="q1"]').forEach(radio=>{
+    radio.addEventListener('change',function(){
+        const show=this.value==='yes';
+        document.getElementById('q2Label').style.display=show?'block':'none';
+        document.getElementById('q2Channels').style.display=show?'block':'none';
+    });
+});
+
+// Clear form
+document.getElementById('clearForm').addEventListener('click',()=>{
+    document.getElementById('questionnaireForm').reset();
+    document.getElementById('q2Label').style.display='none';
+    document.getElementById('q2Channels').style.display='none';
+});
+
+// Buttons
+document.getElementById('loadSummary').addEventListener('click',()=>{displaySummary();drawGraphs();});
+document.getElementById('clearAll').addEventListener('click',()=>{
+    if(confirm('Clear all data?')){
+        localStorage.removeItem(STORAGE_KEY);
+        document.getElementById('summaryContent').innerHTML='<p>No responses yet. Submit some to see summary.</p>';
+        [q1Chart,channelsChart,q5Chart,commentsChart].forEach(c=>c?.destroy());
+    }
+});
+document.getElementById('exportBtn').addEventListener('click',exportToCSV);
+
+// Initial load
+displaySummary(); drawGraphs();
+</script>
+</body>
+</html>
